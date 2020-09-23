@@ -42,7 +42,7 @@ void *get_in_addr(struct sockaddr *sa)
 	return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
 	int sockfd, new_fd;  // listen on sock_fd, new connection on new_fd
 	struct addrinfo hints, *servinfo, *p;
@@ -52,6 +52,13 @@ int main(void)
 	int yes=1;
 	char s[INET6_ADDRSTRLEN];
 	int rv;
+  FILE *fp;
+  char *buf;
+  char line[200];
+  if (argc != 2) {
+    fprintf(stderr,"usage: server filename\n");
+		exit(1);
+  }
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -123,7 +130,20 @@ int main(void)
 
 		if (!fork()) { // this is the child process
 			close(sockfd); // child doesn't need the listener
-			if (send(new_fd, "Hello, world!", 13, 0) == -1)
+      fp = fopen(argv[1], "r");
+      if (fp == NULL) {
+        perror("Error opening file");
+      }
+      fseek(fp, 0, SEEK_END);
+      int byte_nums = ftell(fp);
+      buf = malloc(sizeof(char) * byte_nums);
+      rewind(fp);
+      while (fgets(line, 200, fp) != 0) {
+        strcat(buf, line);
+      }
+      fclose(fp);
+      printf("server send '%d' bytes\n '%s'", byte_nums, buf);
+			if (send(new_fd, buf, byte_nums, 0) == -1)
 				perror("send");
 			close(new_fd);
 			exit(0);
