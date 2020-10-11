@@ -15,7 +15,8 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-#define PORT "3490"  // the port users will be connecting to
+// #define PORT "3490"  // the port users will be connecting to
+#define MAXREQUEST 100
 
 #define BACKLOG 10	 // how many pending connections queue will hold
 
@@ -56,7 +57,7 @@ int main(int argc, char *argv[])
   char *buf;
   char line[200];
   if (argc != 2) {
-    fprintf(stderr,"usage: server filename\n");
+    fprintf(stderr,"usage: http_server port\n If port is less than 1024, please run it with root");
 		exit(1);
   }
 
@@ -65,7 +66,7 @@ int main(int argc, char *argv[])
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_flags = AI_PASSIVE; // use my IP
 
-	if ((rv = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0) {
+	if ((rv = getaddrinfo(NULL, argv[1], &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
 		return 1;
 	}
@@ -130,7 +131,13 @@ int main(int argc, char *argv[])
 
 		if (!fork()) { // this is the child process
 			close(sockfd); // child doesn't need the listener
-      fp = fopen(argv[1], "r");
+      // Receive HTTP request
+      char request[MAXREQUEST];
+      int byte_count = 0;
+      byte_count = recv(new_fd, request, MAXREQUEST, 0);
+      printf("DEBUG: receive request %s", request);
+      // HTTP response
+      fp = fopen("sample.txt", "r");
       if (fp == NULL) {
         perror("Error opening file");
       }
