@@ -1,5 +1,5 @@
 /*
-** server.c -- a stream socket server demo
+** http_server.c -- a stream socket http server demo
 */
 
 #include <stdio.h>
@@ -14,12 +14,17 @@
 #include <arpa/inet.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <ctype.h>
 
 // #define PORT "3490"  // the port users will be connecting to
 #define MAXREQUEST 100
 
 #define BACKLOG 10	 // how many pending connections queue will hold
 
+#define STR400 "HTTP/1.0 400 Bad Request\r\n"
+#define STR404 "HTTP/1.1 404 Not Found\r\n"
+#define STR200 "HTTP/1.0 200 OK\r\n"
+#define MAXDATASIZE 100000
 void sigchld_handler(int s)
 {
 	(void)s; // quiet unused variable warning
@@ -53,13 +58,12 @@ int main(int argc, char *argv[])
 	int yes=1;
 	char s[INET6_ADDRSTRLEN];
 	int rv;
-  FILE *fp;
-  char *buf;
-  char line[200];
-  if (argc != 2) {
-    fprintf(stderr,"usage: http_server port\n If port is less than 1024, please run it with root");
+    FILE *fp;
+    char buf[MAXDATASIZE] = {'\0'};
+    if (argc != 2) {
+      fprintf(stderr,"usage: http_server port\n If port is less than 1024, please run it with root\n");
 		exit(1);
-  }
+    }
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
@@ -131,29 +135,68 @@ int main(int argc, char *argv[])
 
 		if (!fork()) { // this is the child process
 			close(sockfd); // child doesn't need the listener
-      // Receive HTTP request
-      char request[MAXREQUEST];
-      int byte_count = 0;
-      byte_count = recv(new_fd, request, MAXREQUEST, 0);
-      printf("DEBUG: receive request %s", request);
-      // HTTP response
-      fp = fopen("sample.txt", "r");
-      if (fp == NULL) {
-        perror("Error opening file");
-      }
-      fseek(fp, 0, SEEK_END);
-      int byte_nums = ftell(fp);
-      buf = malloc(sizeof(char) * byte_nums);
-      rewind(fp);
-      while (fgets(line, 200, fp) != 0) {
-        strcat(buf, line);
-      }
-      fclose(fp);
-      buf[strlen(buf)-1] = 0;
-      printf("server send '%d' bytes\n '%s'", byte_nums, buf);
-			if (send(new_fd, buf, byte_nums, 0) == -1)
-				perror("send");
-			close(new_fd);
+            // Receive HTTP request
+            char request[MAXREQUEST];
+            int byte_count = 0;
+            byte_count = recv(new_fd, request, MAXREQUEST, 0);
+            if (byte_count == -1) {
+                perror("server: Receive");
+            }
+//             printf("server: receive %d bytes request '%s'", byte_count, request);
+            char method[10] = {'\0'};
+            char filename[30] = {'\0'};
+            char http_version[10] = {'\0'};
+            unsigned long len = strlen(request);
+            int slash_pos;
+            int end_file;
+            for (size_t i = 0; i < len; i++) {
+                if (request[i] == '/') {
+                    slash_pos = i;
+                    for (size_t j = i+1; j < len; j++) {
+                        if (isspace(request[j])) {
+                            end_file = j;
+                            break;
+                        }
+                    }
+                    if (end_file) {
+                        break;
+                    }
+                }
+            }
+//            printf("%d %d ", slash_pos, end_file);
+            strncpy(method, request, slash_pos);
+            strncpy(filename, request+slash_pos+1, end_file-slash_pos-1);
+            strncpy(http_version, request+end_file+1, 8);
+            printf("request method is: %s\nrequest file is: %s\nhttp version is: %s\n", method, filename, http_version);
+            // HTTP response
+            fp = fopen(filename, "rb");
+            if (fp == NULL) {
+                perror("open file");
+                if (send(new_fd, STR404, sizeof(STR404), 0) == -1) {
+                    perror("send");
+                }
+                exit(1);
+            }
+//            fseek(fp, 0, SEEK_END);
+//            int file_bytes = ftell(fp);
+
+//            rewind(fp);
+//            if (send(new_fd, STR200, sizeof(STR200), 0) == -1) {
+//                perror("send");
+//            }
+
+//            while (fgets(line, 100000, fp) != 0) {
+             int numbytes = 0;
+             while ((numbytes = fread(buf, 1, MAXDATASIZE, fp)) > 0) {
+                if (send(new_fd, buf, numbytes, 0) == -1)
+                    perror("send");
+                printf("server send '%d' bytes\n '%s'", numbytes, buf);
+            }
+            fclose(fp);
+
+
+
+            close(new_fd);
 			exit(0);
 		}
 		close(new_fd);  // parent doesn't need this
