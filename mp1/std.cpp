@@ -1,14 +1,8 @@
-/*
-** http_server.c -- a stream socket http server demo
-*/
-
 #include <arpa/inet.h>
-#include <ctype.h>
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <signal.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -16,25 +10,32 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// #define PORT "3490"  // the port users will be connecting to
-#define MAXREQUEST 100
+#include <fstream>
+#include <iostream>
+#include <string>
 
-#define BACKLOG 10 // how many pending connections queue will hold
+#define MAXDATASIZE 1000
+#define BACKLOG 100 // how many pending connections queue will hold
 
-#define STR400 "HTTP/1.1 400 Bad Request\r\n\r\n"
-#define STR404 "HTTP/1.1 404 Not Found\r\n\r\n"
-#define STR200 "HTTP/1.1 200 OK\r\n\r\n"
-#define MAXDATASIZE 2048
+class PacketParser {
+private:
+  std::string method = "";
+  std::string file_path = "";
+
+public:
+  PacketParser(std::string packet) {
+    auto first_space_pos = packet.find_first_of(" ");
+    method = packet.substr(0, first_space_pos);
+    auto sec_space_pos = packet.substr(first_space_pos + 1).find_first_of(" ");
+    file_path = packet.substr(first_space_pos + 1, sec_space_pos);
+  }
+  std::string getMethod() { return method; }
+  std::string getFilePath() { return file_path; }
+};
+
 void sigchld_handler(int s) {
-  (void)s; // quiet unused variable warning
-
-  // waitpid() might overwrite errno, so we save and restore it:
-  int saved_errno = errno;
-
   while (waitpid(-1, NULL, WNOHANG) > 0)
     ;
-
-  errno = saved_errno;
 }
 
 // get sockaddr, IPv4 or IPv6:
@@ -55,12 +56,6 @@ int main(int argc, char *argv[]) {
   int yes = 1;
   char s[INET6_ADDRSTRLEN];
   int rv;
-  FILE *fp;
-  if (argc != 2) {
-    fprintf(stderr, "usage: http_server port\n If port is less than 1024, "
-                    "please run it with root\n");
-    exit(1);
-  }
 
   memset(&hints, 0, sizeof hints);
   hints.ai_family = AF_UNSPEC;
@@ -93,12 +88,12 @@ int main(int argc, char *argv[]) {
     break;
   }
 
-  freeaddrinfo(servinfo); // all done with this structure
-
   if (p == NULL) {
     fprintf(stderr, "server: failed to bind\n");
-    exit(1);
+    return 2;
   }
+
+  freeaddrinfo(servinfo); // all done with this structure
 
   if (listen(sockfd, BACKLOG) == -1) {
     perror("listen");
@@ -126,68 +121,41 @@ int main(int argc, char *argv[]) {
     inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr),
               s, sizeof s);
     printf("server: got connection from %s\n", s);
-
     if (!fork()) {   // this is the child process
       close(sockfd); // child doesn't need the listener
-      // Receive HTTP request
-      char request[MAXREQUEST];
-      int byte_count = 0;
-      byte_count = recv(new_fd, request, MAXREQUEST, 0);
-      if (byte_count == -1) {
-        perror("server: Receive");
-      }
-      //             printf("server: receive %d bytes request '%s'", byte_count,
-      //             request);
-      char method[10] = {'\0'};
-      char filename[30] = {'\0'};
-      char http_version[10] = {'\0'};
-      unsigned long len = strlen(request);
-      int slash_pos;
-      int end_file;
-      for (size_t i = 0; i < len; i++) {
-        if (request[i] == '/') {
-          slash_pos = i;
-          for (size_t j = i + 1; j < len; j++) {
-            if (isspace(request[j])) {
-              end_file = j;
-              break;
-            }
-          }
-          if (end_file) {
-            break;
-          }
-        }
-      }
-      //            printf("%d %d ", slash_pos, end_file);
-      strncpy(method, request, slash_pos);
-      strncpy(filename, request + slash_pos + 1, end_file - slash_pos - 1);
-      strncpy(http_version, request + end_file + 1, 8);
-      printf(
-          "request method is: %s\nrequest file is: %s\nhttp version is: %s\n",
-          method, filename, http_version);
-      // HTTP response
-      fp = fopen(filename, "rb");
-      if (fp == NULL) {
-        perror("open file");
-        if (send(new_fd, STR404, strlen(STR404), 0) == -1) {
-          perror("send");
-        }
+
+      char msg_buf[MAXDATASIZE];
+      recv(new_fd, msg_buf, MAXDATASIZE, 0);
+      std::string string_msg(msg_buf);
+      std::cout << string_msg;
+      PacketParser parser(string_msg);
+
+      if (parser.getMethod() != "GET") {
+        // invalid method type
+        std::string bad_request = "HTTP/1.1 400 Bad Request\r\n";
+        send(new_fd, bad_request.c_str(), bad_request.size(), 0);
         exit(1);
       }
 
-      if (send(new_fd, STR200, strlen(STR200), 0) == -1) {
-        perror("send");
-      }
-      int numbytes = 0;
-      char buf[MAXDATASIZE];
-      while ((numbytes = fread(buf, sizeof(char), MAXDATASIZE, fp)
-              ) > 0) {
-        if (send(new_fd, buf, strlen(buf), 0) == -1) {
-          perror("send");
-          exit(1);
+      std::ifstream files(parser.getFilePath().substr(1).c_str(),
+                          std::ios::binary | std::ios::in);
+      if (!files.good()) {
+        // request file does not exist
+        std::string not_found =
+            "HTTP/1.1 404 Not Found\r\n\r\nwhoops, file not found!\n";
+        send(new_fd, not_found.c_str(), not_found.size(), 0);
+      } else {
+        // request file exists
+        std::string OK = "HTTP/1.1 200 OK\r\n\r\n";
+        send(new_fd, OK.c_str(), OK.size(), 0);
+        char buf[2048];
+        auto fp = fopen(parser.getFilePath().substr(1).c_str(), "rb");
+        int numbytes = 0;
+        while ((numbytes = fread(buf, sizeof(char), 2048, fp)) > 0) {
+          send(new_fd, buf, numbytes, 0);
         }
+        fclose(fp);
       }
-      fclose(fp);
       close(new_fd);
       exit(0);
     }
