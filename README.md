@@ -39,3 +39,15 @@ Who are you? Who am I?
 ## Notes
 1. If you see something like this: `Makefile:66: *** missing separator.  Stop.` Makefile expect command is indented by tab other than space, so you maybe use \t or use tab.
 2. TCP and UDP can use same port.
+
+# MP1
+- Use strlen() instead of sizeof().
+- CRLF = CR LF
+- HTTP Response
+  - Request line, such as GET /logo.gif HTTP/1.1 or Status line, such as HTTP/1.1 200 OK,
+  - Headers
+  - An empty line
+  - Optional HTTP message body data
+
+The request/status line and headers must all end with <CR><LF> (that is, a carriage return followed by a line feed). The empty line must consist of only <CR><LF> and no other whitespace.
+- Don't set const too small
